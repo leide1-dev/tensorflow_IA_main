@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Reconocimiento Facial - Apagar cámara con sonrisa</title>
+
+  <!-- Cargar TensorFlow.js desde CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/facemesh"></script>
+
+  <style>
+    /* Estilos Globales */
+    body {
+      margin: 0;
+      padding: 0;
+      background: linear-gradient(135deg, #3b9f93, #00bcd4);
+      font-family: 'Arial', sans-serif;
+      color: #fff;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      flex-direction: column;
+      text-align: center;
+    }
+
+    h1 {
+      font-size: 3rem;
+      margin-bottom: 20px;
+      font-weight: bold;
+    }
+
+    .video-container {
+      position: relative;
+      width: 80%;
+      max-width: 640px;
+      border-radius: 15px;
+      overflow: hidden;
+      box-shadow: 0px 10px 30px rgba(0, 0, 0, 0.2);
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      border-radius: 15px;
+      object-fit: cover;
+    }
+
+    canvas {
+      position: absolute;
+      top: 0;
+      left: 0;
+      z-index: 2;
+      border-radius: 15px;
+    }
+
+    .camera-status {
+      font-size: 1.5rem;
+      margin-top: 20px;
+      color: #ffd700;
+      font-weight: bold;
+    }
+
+    /* Botón de Interacción */
+    .button {
+      margin-top: 30px;
+      padding: 12px 25px;
+      font-size: 1.2rem;
+      background-color: #ff4081;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      transition: background-color 0.3s;
+    }
+
+    .button:hover {
+      background-color: #e73465;
+    }
+
+    .icon {
+      font-size: 1.5rem;
+      margin-right: 10px;
+    }
+
+    /* Animaciones */
+    @keyframes fadeIn {
+      0% { opacity: 0; }
+      100% { opacity: 1; }
+    }
+
+    /* Animación para el título */
+    h1 {
+      animation: fadeIn 2s ease-in-out;
+    }
+
+  </style>
+</head>
+
+<body>
+
+  <h1>Reconocimiento Facial - Apagar cámara con sonrisa</h1>
+
+  <div class="video-container">
+    <!-- Video y Canvas para la detección de caras -->
+    <video id="video" width="640" height="480" autoplay></video>
+    <canvas id="canvas" width="640" height="480"></canvas>
+  </div>
+
+  <div id="camera-status" class="camera-status">La cámara está activada.</div>
+
+  <button class="button" id="startButton">
+    <i class="icon">📷</i> Iniciar Cámara
+  </button>
+
+  <script>
+    let videoStream = null;
+    let videoPlaying = false;
+
+    async function setupCamera() {
+      const video = document.getElementById('video');
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+        video.srcObject = stream;
+        videoStream = stream;
+        return new Promise((resolve) => {
+          video.onloadedmetadata = () => resolve(video);
+        });
+      } catch (err) {
+        document.getElementById('camera-status').textContent = 'Error al acceder a la cámara.';
+        console.error('Error al acceder a la cámara:', err);
+        return null;
+      }
+    }
+
+    async function run() {
+      const model = await facemesh.load();
+      console.log("Modelo cargado");
+
+      const video = await setupCamera();
+      if (!video) return;
+
+      video.play();
+
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+
+      canvas.width = video.videoWidth;
+      canvas.height = video.videoHeight;
+
+      detectFace(video, model, ctx);
+    }
+
+    async function detectFace(video, model, ctx) {
+      const predictions = await model.estimateFaces(video, false);
+
+      ctx.clearRect(0, 0, ctx.canvas.width, ctx.canvas.height);
+
+      if (predictions.length > 0) {
+        predictions.forEach(prediction => {
+          const boundingBox = prediction.boundingBox;
+          ctx.beginPath();
+          ctx.rect(
+            boundingBox.topLeft[0], boundingBox.topLeft[1],
+            boundingBox.bottomRight[0] - boundingBox.topLeft[0],
+            boundingBox.bottomRight[1] - boundingBox.topLeft[1]
+          );
+          ctx.lineWidth = 3;
+          ctx.strokeStyle = 'red';
+          ctx.stroke();
+
+          const topLip = prediction.scaledMesh[13];
+          const bottomLip = prediction.scaledMesh[14];
+          const distance = Math.abs(topLip[1] - bottomLip[1]);
+          const smileThreshold = 10;
+
+          if (distance > smileThreshold) {
+            console.log("¡Sonrisa detectada!");
+
+            // Apagar la cámara
+            const video = document.getElementById('video');
+            const stream = video.srcObject;
+            const tracks = stream.getTracks();
+            tracks.forEach(track => track.stop());
+            video.srcObject = null;
+
+            document.getElementById('camera-status').textContent = '¡Sonrisa detectada! La cámara ha sido apagada.';
+          }
+        });
+      }
+
+      if (video.srcObject) {
+        requestAnimationFrame(() => detectFace(video, model, ctx));
+      }
+    }
+
+    // Iniciar la cámara con el botón
+    document.getElementById('startButton').addEventListener('click', () => {
+      if (!videoPlaying) {
+        run();
+        videoPlaying = true;
+        document.getElementById('startButton').textContent = "Detener Cámara";
+      } else {
+        // Detener la cámara manualmente
+        if (videoStream) {
+          const tracks = videoStream.getTracks();
+          tracks.forEach(track => track.stop());
+        }
+        document.getElementById('camera-status').textContent = 'La cámara está apagada.';
+        videoPlaying = false;
+        document.getElementById('startButton').textContent = "Iniciar Cámara";
+      }
+    });
+  </script>
+
+</body>
+</html>
